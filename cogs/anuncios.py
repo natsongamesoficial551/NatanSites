@@ -46,7 +46,7 @@ class Anuncios(commands.Cog):
             color=COR_INFO
         )
         embed.set_author(
-            name="NatanDEV | Serviço de Sites",
+            name="NatanSites | Serviço de Sites",
             icon_url=interaction.guild.icon.url if interaction.guild.icon else None
         )
         embed.set_footer(

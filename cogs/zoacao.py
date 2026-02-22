@@ -46,7 +46,7 @@ class ZoacaoView(discord.ui.View):
             description=f"😂 **{interaction.user.display_name}** ativou a zoação:\n\n> {frase}",
             color=COR_ZOACAO
         )
-        embed.set_footer(text="NatanDEV | Modo Zoação 😂")
+        embed.set_footer(text="NatanSites | Modo Zoação 😂")
         await interaction.response.send_message(embed=embed)
 
 
@@ -72,14 +72,14 @@ class Zoacao(commands.Cog):
         embed = discord.Embed(
             title="😂  Modo Zoação Ativado!",
             description=(
-                "Bem-vindo ao canal de diversão do **NatanDEV**! 🎉\n\n"
+                "Bem-vindo ao canal de diversão do **NatanSites**! 🎉\n\n"
                 "Clique no botão abaixo para receber uma **frase de zoação** aleatória\n"
                 "e alegrar o dia de todos por aqui! 😂\n\n"
                 "*Use com responsabilidade... ou não. 🤪*"
             ),
             color=COR_ZOACAO
         )
-        embed.set_footer(text="NatanDEV | Canal de Diversão")
+        embed.set_footer(text="NatanSites | Canal de Diversão")
         embed.timestamp = discord.utils.utcnow()
 
         view = ZoacaoView()

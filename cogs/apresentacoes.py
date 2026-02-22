@@ -15,10 +15,10 @@ class Apresentacoes(commands.Cog):
         numero = member.guild.member_count
 
         embed = discord.Embed(
-            title="✨  Bem-vindo(a) ao NatanDEV!",
+            title="✨  Bem-vindo(a) ao NatanSites!",
             description=(
                 f"Olá, {member.mention}! 🎉\n\n"
-                "É um prazer ter você aqui no **NatanDEV | Serviço de Sites**.\n"
+                "É um prazer ter você aqui no **NatanSites | Serviço de Sites**.\n"
                 "Somos um servidor focado em **desenvolvimento web, projetos digitais e soluções profissionais**.\n\n"
                 "Antes de começar, não esqueça de:\n"
                 f"📜 Ler as regras em <#{CH_REGRAS}>\n"
@@ -50,7 +50,7 @@ class Apresentacoes(commands.Cog):
         )
         embed.set_image(url="https://i.imgur.com/your-banner.png")  # troque pelo seu banner
         embed.set_footer(
-            text="NatanDEV • Serviço de Sites",
+            text="NatanSites • Serviço de Sites",
             icon_url=member.guild.icon.url if member.guild.icon else None
         )
         embed.timestamp = discord.utils.utcnow()

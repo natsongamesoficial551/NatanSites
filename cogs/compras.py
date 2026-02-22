@@ -1,30 +1,18 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import json, os, logging
+import logging
 from config import *
+from database import get_conn
 
 logger = logging.getLogger(__name__)
-DB_PATH = "data/compras.json"
-
-
-def load_db():
-    if not os.path.exists(DB_PATH):
-        return {"compras": [], "contador": 0}
-    with open(DB_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def save_db(data):
-    os.makedirs("data", exist_ok=True)
-    with open(DB_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 class Compras(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="registrar-compra", description="[ADM] Registra uma compra de um usuário no canal Compras.")
+    @app_commands.command(name="registrar-compra", description="[ADM] Registra uma compra no canal Compras.")
     @app_commands.describe(
         usuario="Usuário que realizou a compra",
         produto="Nome do produto/serviço",
@@ -32,32 +20,22 @@ class Compras(commands.Cog):
         observacao="Observação adicional (opcional)"
     )
     @app_commands.checks.has_permissions(administrator=True)
-    async def registrar_compra(
-        self,
-        interaction: discord.Interaction,
-        usuario: discord.Member,
-        produto: str,
-        valor: str,
-        observacao: str = None
-    ):
+    async def registrar_compra(self, interaction: discord.Interaction, usuario: discord.Member,
+                                produto: str, valor: str, observacao: str = None):
         if interaction.channel_id != CH_CONTROLE:
-            await interaction.response.send_message(f"❌ Use este comando no canal <#{CH_CONTROLE}>.", ephemeral=True)
+            await interaction.response.send_message(f"❌ Use no canal <#{CH_CONTROLE}>.", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
 
-        db = load_db()
-        db["contador"] += 1
-        compra_id = f"NDB-{db['contador']:04d}"
-
-        db["compras"].append({
-            "id": compra_id,
-            "usuario_id": usuario.id,
-            "produto": produto,
-            "valor": valor,
-            "observacao": observacao
-        })
-        save_db(db)
+        with get_conn() as conn:
+            conn.execute("UPDATE compras_contador SET valor = valor + 1 WHERE id = 1")
+            contador = conn.execute("SELECT valor FROM compras_contador WHERE id = 1").fetchone()[0]
+            compra_id = f"NTS-{contador:04d}"
+            conn.execute(
+                "INSERT INTO compras (id, usuario_id, produto, valor, observacao) VALUES (?, ?, ?, ?, ?)",
+                (compra_id, usuario.id, produto, valor, observacao)
+            )
 
         canal = interaction.guild.get_channel(CH_COMPRAS)
         if not canal:
@@ -66,7 +44,7 @@ class Compras(commands.Cog):
 
         embed = discord.Embed(
             title="✅  Compra Confirmada!",
-            description=f"Uma nova compra foi registrada com sucesso no **NatanDEV**.",
+            description="Uma nova compra foi registrada com sucesso no **NatanSites**.",
             color=COR_SUCESSO
         )
         embed.set_thumbnail(url=usuario.display_avatar.url)
@@ -77,14 +55,12 @@ class Compras(commands.Cog):
         if observacao:
             embed.add_field(name="📝  Observação", value=observacao, inline=False)
         embed.set_footer(
-            text=f"Registrado por {interaction.user.display_name} | NatanDEV",
+            text=f"Registrado por {interaction.user.display_name} | NatanSites",
             icon_url=interaction.user.display_avatar.url
         )
         embed.timestamp = discord.utils.utcnow()
-
         await canal.send(embed=embed)
 
-        # Log
         canal_log = interaction.guild.get_channel(CH_LOGS)
         if canal_log:
             log = discord.Embed(
@@ -95,10 +71,10 @@ class Compras(commands.Cog):
             log.timestamp = discord.utils.utcnow()
             await canal_log.send(embed=log)
 
-        await interaction.followup.send(f"✅ Compra `{compra_id}` registrada com sucesso!", ephemeral=True)
+        await interaction.followup.send(f"✅ Compra `{compra_id}` registrada!", ephemeral=True)
 
     @registrar_compra.error
-    async def registrar_compra_error(self, interaction, error):
+    async def error(self, interaction, error):
         await interaction.response.send_message("❌ Sem permissão.", ephemeral=True)
 
 

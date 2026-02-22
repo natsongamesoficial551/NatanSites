@@ -1,23 +1,11 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import json, os, logging
+import logging
 from config import *
+from database import get_conn
 
 logger = logging.getLogger(__name__)
-DB_PATH = "data/projetos.json"
-
-
-def load_db():
-    if not os.path.exists(DB_PATH):
-        return {"projetos": {}}
-    with open(DB_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def save_db(data):
-    os.makedirs("data", exist_ok=True)
-    with open(DB_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 class Projetos(commands.Cog):
@@ -33,34 +21,24 @@ class Projetos(commands.Cog):
         cliente="Nome do cliente (opcional)"
     )
     @app_commands.checks.has_permissions(administrator=True)
-    async def projeto_add(
-        self,
-        interaction: discord.Interaction,
-        nome: str,
-        descricao: str,
-        url: str = None,
-        imagem_url: str = None,
-        cliente: str = None
-    ):
+    async def projeto_add(self, interaction: discord.Interaction, nome: str, descricao: str,
+                          url: str = None, imagem_url: str = None, cliente: str = None):
         if interaction.channel_id != CH_CONTROLE:
-            await interaction.response.send_message(f"❌ Use este comando no canal <#{CH_CONTROLE}>.", ephemeral=True)
+            await interaction.response.send_message(f"❌ Use no canal <#{CH_CONTROLE}>.", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
 
-        db = load_db()
-        projeto_id = f"proj_{len(db['projetos']) + 1:04d}"
+        with get_conn() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM projetos").fetchone()[0]
+            projeto_id = f"proj_{count + 1:04d}"
 
         canal = interaction.guild.get_channel(CH_PROJETOS)
         if not canal:
             await interaction.followup.send("❌ Canal de projetos não encontrado.", ephemeral=True)
             return
 
-        embed = discord.Embed(
-            title=f"🗂️  {nome}",
-            description=descricao,
-            color=COR_PRINCIPAL
-        )
+        embed = discord.Embed(title=f"🗂️  {nome}", description=descricao, color=COR_PRINCIPAL)
         if cliente:
             embed.add_field(name="👤  Cliente", value=cliente, inline=True)
         embed.add_field(name="🆔  ID", value=projeto_id, inline=True)
@@ -69,22 +47,18 @@ class Projetos(commands.Cog):
         if imagem_url:
             embed.set_image(url=imagem_url)
         embed.set_footer(
-            text="NatanDEV | Portfólio de Projetos",
+            text="NatanSites | Portfólio de Projetos",
             icon_url=interaction.guild.icon.url if interaction.guild.icon else None
         )
         embed.timestamp = discord.utils.utcnow()
 
         msg = await canal.send(embed=embed)
 
-        db["projetos"][projeto_id] = {
-            "nome": nome,
-            "descricao": descricao,
-            "url": url,
-            "imagem": imagem_url,
-            "cliente": cliente,
-            "msg_id": msg.id
-        }
-        save_db(db)
+        with get_conn() as conn:
+            conn.execute(
+                "INSERT INTO projetos (id, nome, descricao, url, imagem, cliente, msg_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (projeto_id, nome, descricao, url, imagem_url, cliente, msg.id)
+            )
 
         await interaction.followup.send(f"✅ Projeto **{nome}** adicionado! (ID: `{projeto_id}`)", ephemeral=True)
 
@@ -93,27 +67,29 @@ class Projetos(commands.Cog):
     @app_commands.checks.has_permissions(administrator=True)
     async def projeto_remover(self, interaction: discord.Interaction, projeto_id: str):
         if interaction.channel_id != CH_CONTROLE:
-            await interaction.response.send_message(f"❌ Use este comando no canal <#{CH_CONTROLE}>.", ephemeral=True)
+            await interaction.response.send_message(f"❌ Use no canal <#{CH_CONTROLE}>.", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
-        db = load_db()
 
-        if projeto_id not in db["projetos"]:
+        with get_conn() as conn:
+            projeto = conn.execute("SELECT * FROM projetos WHERE id = ?", (projeto_id,)).fetchone()
+
+        if not projeto:
             await interaction.followup.send("❌ Projeto não encontrado.", ephemeral=True)
             return
 
-        projeto = db["projetos"][projeto_id]
         canal = interaction.guild.get_channel(CH_PROJETOS)
-        if projeto.get("msg_id") and canal:
+        if projeto["msg_id"] and canal:
             try:
                 msg = await canal.fetch_message(projeto["msg_id"])
                 await msg.delete()
             except Exception:
                 pass
 
-        del db["projetos"][projeto_id]
-        save_db(db)
+        with get_conn() as conn:
+            conn.execute("DELETE FROM projetos WHERE id = ?", (projeto_id,))
+
         await interaction.followup.send(f"✅ Projeto `{projeto_id}` removido.", ephemeral=True)
 
 

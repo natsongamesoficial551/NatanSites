@@ -14,7 +14,7 @@ class Regras(commands.Cog):
 
     def build_embed(self) -> discord.Embed:
         embed = discord.Embed(
-            title="📜  Regras do Servidor NatanDEV",
+            title="📜  Regras do Servidor NatanSites",
             description=(
                 "Leia com atenção e respeite todas as regras para manter um ambiente saudável e profissional."
             ),
@@ -61,7 +61,7 @@ class Regras(commands.Cog):
             inline=False
         )
         embed.set_footer(
-            text="NatanDEV • Serviço de Sites | @everyone @here",
+            text="NatanSites • Serviço de Sites | @everyone @here",
             icon_url="https://cdn.discordapp.com/emojis/1000000000000000000.webp"
         )
         embed.set_thumbnail(url="https://i.imgur.com/your-logo.png")  # troque pela sua logo

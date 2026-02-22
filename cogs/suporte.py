@@ -112,7 +112,7 @@ class SuporteView(discord.ui.View):
             color=COR_SUPORTE
         )
         embed.set_thumbnail(url=user.display_avatar.url)
-        embed.set_footer(text="NatanDEV | Suporte Técnico")
+        embed.set_footer(text="NatanSites | Suporte Técnico")
         embed.timestamp = discord.utils.utcnow()
 
         view = FecharTicketView()
@@ -155,7 +155,7 @@ class Suporte(commands.Cog):
             logger.error(f"Erro ao limpar canal suporte: {e}")
 
         embed = discord.Embed(
-            title="🛠️  Central de Suporte — NatanDEV",
+            title="🛠️  Central de Suporte — NatanSites",
             description=(
                 "Precisa de ajuda? Nosso time está pronto para te atender!\n\n"
                 "**Clique no botão abaixo para abrir um ticket de suporte.**\n\n"
@@ -175,7 +175,7 @@ class Suporte(commands.Cog):
             ),
             inline=False
         )
-        embed.set_footer(text="NatanDEV | Serviço de Sites")
+        embed.set_footer(text="NatanSites | Serviço de Sites")
         embed.timestamp = discord.utils.utcnow()
 
         view = SuporteView()

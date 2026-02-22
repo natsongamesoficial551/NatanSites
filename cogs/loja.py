@@ -1,36 +1,30 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import json, os, logging
+import logging
 from config import *
+from database import get_conn
 
 logger = logging.getLogger(__name__)
-DB_PATH = "data/loja.json"
 
 
-def load_db():
-    if not os.path.exists(DB_PATH):
-        return {"produtos": {}, "carrinho": {}}
-    with open(DB_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def save_db(data):
-    os.makedirs("data", exist_ok=True)
-    with open(DB_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-
-# ── Views ───────────────────────────────────────────────────────────
+# ── View persistente do carrinho ─────────────────────────────────────
 
 class CarrinhoView(discord.ui.View):
     def __init__(self, produto_id: str):
         super().__init__(timeout=None)
         self.produto_id = produto_id
 
-    @discord.ui.button(label="🛒  Adicionar ao Carrinho", style=discord.ButtonStyle.primary, custom_id="carrinho_btn")
+    @discord.ui.button(
+        label="🛒  Adicionar ao Carrinho",
+        style=discord.ButtonStyle.primary,
+        custom_id="carrinho_btn"
+    )
     async def adicionar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        db = load_db()
-        produto = db["produtos"].get(self.produto_id)
+        with get_conn() as conn:
+            produto = conn.execute(
+                "SELECT * FROM produtos WHERE id = ?", (self.produto_id,)
+            ).fetchone()
 
         if not produto:
             await interaction.response.send_message("❌ Produto não encontrado.", ephemeral=True)
@@ -41,23 +35,23 @@ class CarrinhoView(discord.ui.View):
             return
 
         user_id = str(interaction.user.id)
-        if user_id not in db["carrinho"]:
-            db["carrinho"][user_id] = []
+        with get_conn() as conn:
+            existente = conn.execute(
+                "SELECT 1 FROM carrinho WHERE user_id = ? AND produto_id = ?",
+                (user_id, self.produto_id)
+            ).fetchone()
 
-        # Verifica se já está no carrinho
-        for item in db["carrinho"][user_id]:
-            if item["id"] == self.produto_id:
+            if existente:
                 await interaction.response.send_message(
-                    "⚠️ Este produto já está no seu carrinho! Aguarde o contato do administrador.", ephemeral=True
+                    "⚠️ Este produto já está no seu carrinho! Aguarde o contato do administrador.",
+                    ephemeral=True
                 )
                 return
 
-        db["carrinho"][user_id].append({
-            "id": self.produto_id,
-            "nome": produto["nome"],
-            "valor": produto["valor"]
-        })
-        save_db(db)
+            conn.execute(
+                "INSERT INTO carrinho (user_id, produto_id, nome, valor) VALUES (?, ?, ?, ?)",
+                (user_id, self.produto_id, produto["nome"], produto["valor"])
+            )
 
         await interaction.response.send_message(
             f"✅ **{produto['nome']}** adicionado ao carrinho!\n"
@@ -65,7 +59,6 @@ class CarrinhoView(discord.ui.View):
             ephemeral=True
         )
 
-        # Notifica logs
         canal_log = interaction.guild.get_channel(CH_LOGS)
         if canal_log:
             embed = discord.Embed(
@@ -77,14 +70,14 @@ class CarrinhoView(discord.ui.View):
             await canal_log.send(embed=embed)
 
 
-# ── Cog ─────────────────────────────────────────────────────────────
+# ── Cog ──────────────────────────────────────────────────────────────
 
 class Loja(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # Registra views persistentes
         bot.add_view(CarrinhoView("placeholder"))
 
+    # ── /loja-add ────────────────────────────────────────────────────
     @app_commands.command(name="loja-add", description="[ADM] Adiciona um produto à loja.")
     @app_commands.describe(
         nome="Nome do produto",
@@ -94,110 +87,110 @@ class Loja(commands.Cog):
         imagem_url="URL da imagem do produto (opcional)"
     )
     @app_commands.checks.has_permissions(administrator=True)
-    async def loja_add(
-        self,
-        interaction: discord.Interaction,
-        nome: str,
-        descricao: str,
-        valor: str,
-        estoque: int,
-        imagem_url: str = None
-    ):
+    async def loja_add(self, interaction: discord.Interaction, nome: str, descricao: str,
+                       valor: str, estoque: int, imagem_url: str = None):
         if interaction.channel_id != CH_CONTROLE:
-            await interaction.response.send_message(f"❌ Use este comando no canal <#{CH_CONTROLE}>.", ephemeral=True)
+            await interaction.response.send_message(f"❌ Use no canal <#{CH_CONTROLE}>.", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
 
-        db = load_db()
-        produto_id = f"prod_{len(db['produtos']) + 1:04d}"
-        db["produtos"][produto_id] = {
-            "nome": nome,
-            "descricao": descricao,
-            "valor": valor,
-            "estoque": estoque,
-            "imagem": imagem_url,
-            "msg_id": None
-        }
-        save_db(db)
+        with get_conn() as conn:
+            count = conn.execute("SELECT COUNT(*) FROM produtos").fetchone()[0]
+            produto_id = f"prod_{count + 1:04d}"
+            conn.execute(
+                "INSERT INTO produtos (id, nome, descricao, valor, estoque, imagem) VALUES (?, ?, ?, ?, ?, ?)",
+                (produto_id, nome, descricao, valor, estoque, imagem_url)
+            )
 
         canal = interaction.guild.get_channel(CH_LOJA)
-        embed = self._build_produto_embed(produto_id, db["produtos"][produto_id])
+        produto = {"nome": nome, "descricao": descricao, "valor": valor,
+                   "estoque": estoque, "imagem": imagem_url}
+        embed = self._build_embed(produto_id, produto)
         view = CarrinhoView(produto_id)
         msg = await canal.send(embed=embed, view=view)
 
-        db["produtos"][produto_id]["msg_id"] = msg.id
-        save_db(db)
+        with get_conn() as conn:
+            conn.execute("UPDATE produtos SET msg_id = ? WHERE id = ?", (msg.id, produto_id))
 
-        await interaction.followup.send(f"✅ Produto **{nome}** adicionado à loja! (ID: `{produto_id}`)", ephemeral=True)
+        await interaction.followup.send(f"✅ Produto **{nome}** adicionado! (ID: `{produto_id}`)", ephemeral=True)
 
+    # ── /loja-remover ────────────────────────────────────────────────
     @app_commands.command(name="loja-remover", description="[ADM] Remove um produto da loja.")
     @app_commands.describe(produto_id="ID do produto (ex: prod_0001)")
     @app_commands.checks.has_permissions(administrator=True)
     async def loja_remover(self, interaction: discord.Interaction, produto_id: str):
         if interaction.channel_id != CH_CONTROLE:
-            await interaction.response.send_message(f"❌ Use este comando no canal <#{CH_CONTROLE}>.", ephemeral=True)
+            await interaction.response.send_message(f"❌ Use no canal <#{CH_CONTROLE}>.", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
-        db = load_db()
 
-        if produto_id not in db["produtos"]:
+        with get_conn() as conn:
+            produto = conn.execute("SELECT * FROM produtos WHERE id = ?", (produto_id,)).fetchone()
+
+        if not produto:
             await interaction.followup.send("❌ Produto não encontrado.", ephemeral=True)
             return
 
-        produto = db["produtos"][produto_id]
-        # Tenta deletar a mensagem da loja
         canal = interaction.guild.get_channel(CH_LOJA)
-        if produto.get("msg_id") and canal:
+        if produto["msg_id"] and canal:
             try:
                 msg = await canal.fetch_message(produto["msg_id"])
                 await msg.delete()
             except Exception:
                 pass
 
-        del db["produtos"][produto_id]
-        save_db(db)
+        with get_conn() as conn:
+            conn.execute("DELETE FROM produtos WHERE id = ?", (produto_id,))
+
         await interaction.followup.send(f"✅ Produto `{produto_id}` removido.", ephemeral=True)
 
+    # ── /ver-carrinho ────────────────────────────────────────────────
     @app_commands.command(name="ver-carrinho", description="[ADM] Vê todos os usuários com itens no carrinho.")
     @app_commands.checks.has_permissions(administrator=True)
     async def ver_carrinho(self, interaction: discord.Interaction):
         if interaction.channel_id != CH_CONTROLE:
-            await interaction.response.send_message(f"❌ Use este comando no canal <#{CH_CONTROLE}>.", ephemeral=True)
+            await interaction.response.send_message(f"❌ Use no canal <#{CH_CONTROLE}>.", ephemeral=True)
             return
 
-        db = load_db()
-        if not db["carrinho"]:
+        with get_conn() as conn:
+            itens = conn.execute("SELECT * FROM carrinho ORDER BY user_id").fetchall()
+
+        if not itens:
             await interaction.response.send_message("🛒 Nenhum item nos carrinhos no momento.", ephemeral=True)
             return
 
         embed = discord.Embed(title="🛒  Carrinhos Ativos", color=COR_LOJA)
-        for user_id, itens in db["carrinho"].items():
-            if not itens:
-                continue
-            user = interaction.guild.get_member(int(user_id))
-            nome = user.display_name if user else f"ID: {user_id}"
-            lista = "\n".join([f"• {i['nome']} — R$ {i['valor']}" for i in itens])
-            embed.add_field(name=f"👤 {nome}", value=lista, inline=False)
+        agrupado = {}
+        for item in itens:
+            uid = item["user_id"]
+            agrupado.setdefault(uid, []).append(item)
+
+        for uid, lista in agrupado.items():
+            member = interaction.guild.get_member(int(uid))
+            nome = member.display_name if member else f"ID: {uid}"
+            valor_lista = "\n".join([f"• {i['nome']} — R$ {i['valor']}" for i in lista])
+            embed.add_field(name=f"👤 {nome}", value=valor_lista, inline=False)
 
         embed.timestamp = discord.utils.utcnow()
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    # ── /limpar-carrinho ─────────────────────────────────────────────
     @app_commands.command(name="limpar-carrinho", description="[ADM] Limpa o carrinho de um usuário após venda.")
     @app_commands.describe(usuario="Usuário para limpar o carrinho")
     @app_commands.checks.has_permissions(administrator=True)
     async def limpar_carrinho(self, interaction: discord.Interaction, usuario: discord.Member):
         if interaction.channel_id != CH_CONTROLE:
-            await interaction.response.send_message(f"❌ Use este comando no canal <#{CH_CONTROLE}>.", ephemeral=True)
+            await interaction.response.send_message(f"❌ Use no canal <#{CH_CONTROLE}>.", ephemeral=True)
             return
 
-        db = load_db()
-        db["carrinho"][str(usuario.id)] = []
-        save_db(db)
+        with get_conn() as conn:
+            conn.execute("DELETE FROM carrinho WHERE user_id = ?", (str(usuario.id),))
+
         await interaction.response.send_message(f"✅ Carrinho de {usuario.mention} limpo.", ephemeral=True)
 
-    def _build_produto_embed(self, produto_id: str, produto: dict) -> discord.Embed:
+    def _build_embed(self, produto_id: str, produto: dict) -> discord.Embed:
         embed = discord.Embed(
             title=f"🛍️  {produto['nome']}",
             description=produto["descricao"],
@@ -208,7 +201,7 @@ class Loja(commands.Cog):
         embed.add_field(name="🆔  ID", value=produto_id, inline=True)
         if produto.get("imagem"):
             embed.set_image(url=produto["imagem"])
-        embed.set_footer(text="NatanDEV | Clique no botão abaixo para adicionar ao carrinho")
+        embed.set_footer(text="NatanSites | Clique no botão abaixo para adicionar ao carrinho")
         embed.timestamp = discord.utils.utcnow()
         return embed
 
