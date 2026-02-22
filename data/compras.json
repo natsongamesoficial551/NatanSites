@@ -1,0 +1,12 @@
+{
+  "compras": [
+    {
+      "id": "NDB-0001",
+      "usuario_id": 1377043711858442292,
+      "produto": "otimizador pago",
+      "valor": "37",
+      "observacao": null
+    }
+  ],
+  "contador": 1
+}

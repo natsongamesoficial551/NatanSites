@@ -1,0 +1,15 @@
+{
+  "produtos": {
+    "prod_0001": {
+      "nome": "Otimizador de PC PRO — Performance Máxima",
+      "descricao": "⚡ Ganhe +8 a +10 FPS em jogos, tenha mais velocidade no trabalho e sinta seu PC rodando como nunca! Nossa otimização completa remove tudo que trava e deixa sua máquina no limite da performance. Invista agora e jogue sem travar!",
+      "valor": "37",
+      "estoque": 200,
+      "imagem": null,
+      "msg_id": 1475165039467171881
+    }
+  },
+  "carrinho": {
+    "1377043711858442292": []
+  }
+}

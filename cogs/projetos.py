@@ -1,0 +1,121 @@
+import discord
+from discord.ext import commands
+from discord import app_commands
+import json, os, logging
+from config import *
+
+logger = logging.getLogger(__name__)
+DB_PATH = "data/projetos.json"
+
+
+def load_db():
+    if not os.path.exists(DB_PATH):
+        return {"projetos": {}}
+    with open(DB_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+def save_db(data):
+    os.makedirs("data", exist_ok=True)
+    with open(DB_PATH, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+class Projetos(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    @app_commands.command(name="projeto-add", description="[ADM] Adiciona um projeto ao canal de projetos.")
+    @app_commands.describe(
+        nome="Nome do projeto",
+        descricao="Descrição do projeto",
+        url="Link do projeto (opcional)",
+        imagem_url="URL da imagem do projeto (opcional)",
+        cliente="Nome do cliente (opcional)"
+    )
+    @app_commands.checks.has_permissions(administrator=True)
+    async def projeto_add(
+        self,
+        interaction: discord.Interaction,
+        nome: str,
+        descricao: str,
+        url: str = None,
+        imagem_url: str = None,
+        cliente: str = None
+    ):
+        if interaction.channel_id != CH_CONTROLE:
+            await interaction.response.send_message(f"❌ Use este comando no canal <#{CH_CONTROLE}>.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        db = load_db()
+        projeto_id = f"proj_{len(db['projetos']) + 1:04d}"
+
+        canal = interaction.guild.get_channel(CH_PROJETOS)
+        if not canal:
+            await interaction.followup.send("❌ Canal de projetos não encontrado.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title=f"🗂️  {nome}",
+            description=descricao,
+            color=COR_PRINCIPAL
+        )
+        if cliente:
+            embed.add_field(name="👤  Cliente", value=cliente, inline=True)
+        embed.add_field(name="🆔  ID", value=projeto_id, inline=True)
+        if url:
+            embed.add_field(name="🔗  Link do Projeto", value=f"[Clique aqui para acessar]({url})", inline=False)
+        if imagem_url:
+            embed.set_image(url=imagem_url)
+        embed.set_footer(
+            text="NatanDEV | Portfólio de Projetos",
+            icon_url=interaction.guild.icon.url if interaction.guild.icon else None
+        )
+        embed.timestamp = discord.utils.utcnow()
+
+        msg = await canal.send(embed=embed)
+
+        db["projetos"][projeto_id] = {
+            "nome": nome,
+            "descricao": descricao,
+            "url": url,
+            "imagem": imagem_url,
+            "cliente": cliente,
+            "msg_id": msg.id
+        }
+        save_db(db)
+
+        await interaction.followup.send(f"✅ Projeto **{nome}** adicionado! (ID: `{projeto_id}`)", ephemeral=True)
+
+    @app_commands.command(name="projeto-remover", description="[ADM] Remove um projeto do canal.")
+    @app_commands.describe(projeto_id="ID do projeto (ex: proj_0001)")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def projeto_remover(self, interaction: discord.Interaction, projeto_id: str):
+        if interaction.channel_id != CH_CONTROLE:
+            await interaction.response.send_message(f"❌ Use este comando no canal <#{CH_CONTROLE}>.", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        db = load_db()
+
+        if projeto_id not in db["projetos"]:
+            await interaction.followup.send("❌ Projeto não encontrado.", ephemeral=True)
+            return
+
+        projeto = db["projetos"][projeto_id]
+        canal = interaction.guild.get_channel(CH_PROJETOS)
+        if projeto.get("msg_id") and canal:
+            try:
+                msg = await canal.fetch_message(projeto["msg_id"])
+                await msg.delete()
+            except Exception:
+                pass
+
+        del db["projetos"][projeto_id]
+        save_db(db)
+        await interaction.followup.send(f"✅ Projeto `{projeto_id}` removido.", ephemeral=True)
+
+
+async def setup(bot):
+    await bot.add_cog(Projetos(bot))
