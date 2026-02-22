@@ -8,23 +8,22 @@ from database import get_conn
 logger = logging.getLogger(__name__)
 
 
-# ── View persistente do carrinho ─────────────────────────────────────
-
 class CarrinhoView(discord.ui.View):
     def __init__(self, produto_id: str):
         super().__init__(timeout=None)
         self.produto_id = produto_id
+        self.carrinho_btn.custom_id = f"carrinho_btn_{produto_id}"
 
     @discord.ui.button(
         label="🛒  Adicionar ao Carrinho",
         style=discord.ButtonStyle.primary,
-        custom_id="carrinho_btn"
+        custom_id="carrinho_btn_placeholder"
     )
-    async def adicionar(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def carrinho_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        produto_id = interaction.data["custom_id"].replace("carrinho_btn_", "")
+
         with get_conn() as conn:
-            produto = conn.execute(
-                "SELECT * FROM produtos WHERE id = ?", (self.produto_id,)
-            ).fetchone()
+            produto = conn.execute("SELECT * FROM produtos WHERE id = ?", (produto_id,)).fetchone()
 
         if not produto:
             await interaction.response.send_message("❌ Produto não encontrado.", ephemeral=True)
@@ -38,7 +37,7 @@ class CarrinhoView(discord.ui.View):
         with get_conn() as conn:
             existente = conn.execute(
                 "SELECT 1 FROM carrinho WHERE user_id = ? AND produto_id = ?",
-                (user_id, self.produto_id)
+                (user_id, produto_id)
             ).fetchone()
 
             if existente:
@@ -50,7 +49,7 @@ class CarrinhoView(discord.ui.View):
 
             conn.execute(
                 "INSERT INTO carrinho (user_id, produto_id, nome, valor) VALUES (?, ?, ?, ?)",
-                (user_id, self.produto_id, produto["nome"], produto["valor"])
+                (user_id, produto_id, produto["nome"], produto["valor"])
             )
 
         await interaction.response.send_message(
@@ -70,20 +69,26 @@ class CarrinhoView(discord.ui.View):
             await canal_log.send(embed=embed)
 
 
-# ── Cog ──────────────────────────────────────────────────────────────
-
 class Loja(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        bot.add_view(CarrinhoView("placeholder"))
+        self._register_views()
 
-    # ── /loja-add ────────────────────────────────────────────────────
+    def _register_views(self):
+        """Registra as views de todos os produtos salvos ao iniciar."""
+        try:
+            with get_conn() as conn:
+                produtos = conn.execute("SELECT id FROM produtos").fetchall()
+            for p in produtos:
+                self.bot.add_view(CarrinhoView(p["id"]))
+            logger.info(f"✅ Loja: {len(produtos)} view(s) persistente(s) registrada(s).")
+        except Exception as e:
+            logger.error(f"Erro ao registrar views loja: {e}")
+
     @app_commands.command(name="loja-add", description="[ADM] Adiciona um produto à loja.")
     @app_commands.describe(
-        nome="Nome do produto",
-        descricao="Descrição do produto",
-        valor="Valor do produto (ex: 29.90)",
-        estoque="Quantidade em estoque",
+        nome="Nome do produto", descricao="Descrição do produto",
+        valor="Valor do produto (ex: 29.90)", estoque="Quantidade em estoque",
         imagem_url="URL da imagem do produto (opcional)"
     )
     @app_commands.checks.has_permissions(administrator=True)
@@ -108,6 +113,7 @@ class Loja(commands.Cog):
                    "estoque": estoque, "imagem": imagem_url}
         embed = self._build_embed(produto_id, produto)
         view = CarrinhoView(produto_id)
+        self.bot.add_view(view)
         msg = await canal.send(embed=embed, view=view)
 
         with get_conn() as conn:
@@ -115,7 +121,6 @@ class Loja(commands.Cog):
 
         await interaction.followup.send(f"✅ Produto **{nome}** adicionado! (ID: `{produto_id}`)", ephemeral=True)
 
-    # ── /loja-remover ────────────────────────────────────────────────
     @app_commands.command(name="loja-remover", description="[ADM] Remove um produto da loja.")
     @app_commands.describe(produto_id="ID do produto (ex: prod_0001)")
     @app_commands.checks.has_permissions(administrator=True)
@@ -146,7 +151,6 @@ class Loja(commands.Cog):
 
         await interaction.followup.send(f"✅ Produto `{produto_id}` removido.", ephemeral=True)
 
-    # ── /ver-carrinho ────────────────────────────────────────────────
     @app_commands.command(name="ver-carrinho", description="[ADM] Vê todos os usuários com itens no carrinho.")
     @app_commands.checks.has_permissions(administrator=True)
     async def ver_carrinho(self, interaction: discord.Interaction):
@@ -164,8 +168,7 @@ class Loja(commands.Cog):
         embed = discord.Embed(title="🛒  Carrinhos Ativos", color=COR_LOJA)
         agrupado = {}
         for item in itens:
-            uid = item["user_id"]
-            agrupado.setdefault(uid, []).append(item)
+            agrupado.setdefault(item["user_id"], []).append(item)
 
         for uid, lista in agrupado.items():
             member = interaction.guild.get_member(int(uid))
@@ -176,7 +179,6 @@ class Loja(commands.Cog):
         embed.timestamp = discord.utils.utcnow()
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    # ── /limpar-carrinho ─────────────────────────────────────────────
     @app_commands.command(name="limpar-carrinho", description="[ADM] Limpa o carrinho de um usuário após venda.")
     @app_commands.describe(usuario="Usuário para limpar o carrinho")
     @app_commands.checks.has_permissions(administrator=True)

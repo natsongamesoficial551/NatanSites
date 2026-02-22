@@ -12,15 +12,20 @@ class FreeView(discord.ui.View):
     def __init__(self, item_id: str):
         super().__init__(timeout=None)
         self.item_id = item_id
+        # custom_id único por item — sobrevive ao reinício do bot
+        self.adquirir_btn.custom_id = f"free_btn_{item_id}"
 
     @discord.ui.button(
         label="⬇️  Adquirir Gratuitamente",
         style=discord.ButtonStyle.success,
-        custom_id="free_btn"
+        custom_id="free_btn_placeholder"  # sobrescrito no __init__
     )
-    async def adquirir(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def adquirir_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Extrai o item_id do custom_id do botão clicado
+        item_id = interaction.data["custom_id"].replace("free_btn_", "")
+
         with get_conn() as conn:
-            item = conn.execute("SELECT * FROM free_itens WHERE id = ?", (self.item_id,)).fetchone()
+            item = conn.execute("SELECT * FROM free_itens WHERE id = ?", (item_id,)).fetchone()
 
         if not item:
             await interaction.response.send_message("❌ Item não encontrado.", ephemeral=True)
@@ -41,7 +46,7 @@ class FreeView(discord.ui.View):
 
         if item["estoque"] is not None:
             with get_conn() as conn:
-                conn.execute("UPDATE free_itens SET estoque = estoque - 1 WHERE id = ?", (self.item_id,))
+                conn.execute("UPDATE free_itens SET estoque = estoque - 1 WHERE id = ?", (item_id,))
 
         canal_log = interaction.guild.get_channel(CH_LOGS)
         if canal_log:
@@ -57,7 +62,18 @@ class FreeView(discord.ui.View):
 class Free(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        bot.add_view(FreeView("placeholder"))
+        self._register_views()
+
+    def _register_views(self):
+        """Registra as views de todos os itens salvos no banco ao iniciar."""
+        try:
+            with get_conn() as conn:
+                itens = conn.execute("SELECT id FROM free_itens").fetchall()
+            for item in itens:
+                self.bot.add_view(FreeView(item["id"]))
+            logger.info(f"✅ Free: {len(itens)} view(s) persistente(s) registrada(s).")
+        except Exception as e:
+            logger.error(f"Erro ao registrar views free: {e}")
 
     @app_commands.command(name="free-add", description="[ADM] Adiciona um item gratuito ao canal Free.")
     @app_commands.describe(
@@ -89,6 +105,7 @@ class Free(commands.Cog):
                 "estoque": estoque, "imagem": imagem_url}
         embed = self._build_embed(item_id, item)
         view = FreeView(item_id)
+        self.bot.add_view(view)  # registra a nova view imediatamente
         msg = await canal.send(embed=embed, view=view)
 
         with get_conn() as conn:
@@ -143,7 +160,7 @@ class Free(commands.Cog):
         return embed
 
     async def auto_setup(self, guild: discord.Guild):
-        logger.info("ℹ️ Free: itens persistidos no SQLite, sem embed fixo.")
+        logger.info("ℹ️ Free: views já registradas via _register_views.")
 
 
 async def setup(bot):
