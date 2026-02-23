@@ -28,14 +28,20 @@ class Compras(commands.Cog):
 
         await interaction.response.defer(ephemeral=True)
 
-        with get_conn() as conn:
-            conn.execute("UPDATE compras_contador SET valor = valor + 1 WHERE id = 1")
-            contador = conn.execute("SELECT valor FROM compras_contador WHERE id = 1").fetchone()[0]
-            compra_id = f"NTS-{contador:04d}"
-            conn.execute(
-                "INSERT INTO compras (id, usuario_id, produto, valor, observacao) VALUES (?, ?, ?, ?, ?)",
-                (compra_id, usuario.id, produto, valor, observacao)
-            )
+        conn = get_conn()
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE compras_contador SET valor = valor + 1 WHERE id = 1")
+                    cur.execute("SELECT valor FROM compras_contador WHERE id = 1")
+                    contador = cur.fetchone()["valor"]
+                    compra_id = f"NTS-{contador:04d}"
+                    cur.execute(
+                        "INSERT INTO compras (id, usuario_id, produto, valor, observacao) VALUES (%s, %s, %s, %s, %s)",
+                        (compra_id, usuario.id, produto, valor, observacao)
+                    )
+        finally:
+            conn.close()
 
         canal = interaction.guild.get_channel(CH_COMPRAS)
         if not canal:

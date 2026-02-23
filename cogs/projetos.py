@@ -14,10 +14,8 @@ class Projetos(commands.Cog):
 
     @app_commands.command(name="projeto-add", description="[ADM] Adiciona um projeto ao canal de projetos.")
     @app_commands.describe(
-        nome="Nome do projeto",
-        descricao="Descrição do projeto",
-        url="Link do projeto (opcional)",
-        imagem_url="URL da imagem do projeto (opcional)",
+        nome="Nome do projeto", descricao="Descrição do projeto",
+        url="Link do projeto (opcional)", imagem_url="URL da imagem (opcional)",
         cliente="Nome do cliente (opcional)"
     )
     @app_commands.checks.has_permissions(administrator=True)
@@ -29,9 +27,14 @@ class Projetos(commands.Cog):
 
         await interaction.response.defer(ephemeral=True)
 
-        with get_conn() as conn:
-            count = conn.execute("SELECT COUNT(*) FROM projetos").fetchone()[0]
-            projeto_id = f"proj_{count + 1:04d}"
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT COUNT(*) FROM projetos")
+                count = cur.fetchone()["count"]
+                projeto_id = f"proj_{count + 1:04d}"
+        finally:
+            conn.close()
 
         canal = interaction.guild.get_channel(CH_PROJETOS)
         if not canal:
@@ -51,14 +54,18 @@ class Projetos(commands.Cog):
             icon_url=interaction.guild.icon.url if interaction.guild.icon else None
         )
         embed.timestamp = discord.utils.utcnow()
-
         msg = await canal.send(embed=embed)
 
-        with get_conn() as conn:
-            conn.execute(
-                "INSERT INTO projetos (id, nome, descricao, url, imagem, cliente, msg_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (projeto_id, nome, descricao, url, imagem_url, cliente, msg.id)
-            )
+        conn = get_conn()
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO projetos (id, nome, descricao, url, imagem, cliente, msg_id) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                        (projeto_id, nome, descricao, url, imagem_url, cliente, msg.id)
+                    )
+        finally:
+            conn.close()
 
         await interaction.followup.send(f"✅ Projeto **{nome}** adicionado! (ID: `{projeto_id}`)", ephemeral=True)
 
@@ -72,8 +79,13 @@ class Projetos(commands.Cog):
 
         await interaction.response.defer(ephemeral=True)
 
-        with get_conn() as conn:
-            projeto = conn.execute("SELECT * FROM projetos WHERE id = ?", (projeto_id,)).fetchone()
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM projetos WHERE id = %s", (projeto_id,))
+                projeto = cur.fetchone()
+        finally:
+            conn.close()
 
         if not projeto:
             await interaction.followup.send("❌ Projeto não encontrado.", ephemeral=True)
@@ -87,8 +99,13 @@ class Projetos(commands.Cog):
             except Exception:
                 pass
 
-        with get_conn() as conn:
-            conn.execute("DELETE FROM projetos WHERE id = ?", (projeto_id,))
+        conn = get_conn()
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM projetos WHERE id = %s", (projeto_id,))
+        finally:
+            conn.close()
 
         await interaction.followup.send(f"✅ Projeto `{projeto_id}` removido.", ephemeral=True)
 

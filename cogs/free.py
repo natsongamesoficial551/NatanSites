@@ -12,20 +12,23 @@ class FreeView(discord.ui.View):
     def __init__(self, item_id: str):
         super().__init__(timeout=None)
         self.item_id = item_id
-        # custom_id único por item — sobrevive ao reinício do bot
         self.adquirir_btn.custom_id = f"free_btn_{item_id}"
 
     @discord.ui.button(
         label="⬇️  Adquirir Gratuitamente",
         style=discord.ButtonStyle.success,
-        custom_id="free_btn_placeholder"  # sobrescrito no __init__
+        custom_id="free_btn_placeholder"
     )
     async def adquirir_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # Extrai o item_id do custom_id do botão clicado
         item_id = interaction.data["custom_id"].replace("free_btn_", "")
 
-        with get_conn() as conn:
-            item = conn.execute("SELECT * FROM free_itens WHERE id = ?", (item_id,)).fetchone()
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM free_itens WHERE id = %s", (item_id,))
+                item = cur.fetchone()
+        finally:
+            conn.close()
 
         if not item:
             await interaction.response.send_message("❌ Item não encontrado.", ephemeral=True)
@@ -45,8 +48,13 @@ class FreeView(discord.ui.View):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
         if item["estoque"] is not None:
-            with get_conn() as conn:
-                conn.execute("UPDATE free_itens SET estoque = estoque - 1 WHERE id = ?", (item_id,))
+            conn = get_conn()
+            try:
+                with conn:
+                    with conn.cursor() as cur:
+                        cur.execute("UPDATE free_itens SET estoque = estoque - 1 WHERE id = %s", (item_id,))
+            finally:
+                conn.close()
 
         canal_log = interaction.guild.get_channel(CH_LOGS)
         if canal_log:
@@ -65,20 +73,23 @@ class Free(commands.Cog):
         self._register_views()
 
     def _register_views(self):
-        """Registra as views de todos os itens salvos no banco ao iniciar."""
         try:
-            with get_conn() as conn:
-                itens = conn.execute("SELECT id FROM free_itens").fetchall()
+            conn = get_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id FROM free_itens")
+                    itens = cur.fetchall()
+            finally:
+                conn.close()
             for item in itens:
                 self.bot.add_view(FreeView(item["id"]))
-            logger.info(f"✅ Free: {len(itens)} view(s) persistente(s) registrada(s).")
+            logger.info(f"✅ Free: {len(itens)} view(s) registrada(s).")
         except Exception as e:
             logger.error(f"Erro ao registrar views free: {e}")
 
     @app_commands.command(name="free-add", description="[ADM] Adiciona um item gratuito ao canal Free.")
     @app_commands.describe(
-        nome="Nome do item",
-        descricao="Descrição do item",
+        nome="Nome do item", descricao="Descrição do item",
         link_download="Link direto de download",
         estoque="Quantidade disponível (deixe vazio para ilimitado)",
         imagem_url="URL de imagem do item (opcional)"
@@ -92,24 +103,35 @@ class Free(commands.Cog):
 
         await interaction.response.defer(ephemeral=True)
 
-        with get_conn() as conn:
-            count = conn.execute("SELECT COUNT(*) FROM free_itens").fetchone()[0]
-            item_id = f"free_{count + 1:04d}"
-            conn.execute(
-                "INSERT INTO free_itens (id, nome, descricao, link, estoque, imagem) VALUES (?, ?, ?, ?, ?, ?)",
-                (item_id, nome, descricao, link_download, estoque, imagem_url)
-            )
+        conn = get_conn()
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) FROM free_itens")
+                    count = cur.fetchone()["count"]
+                    item_id = f"free_{count + 1:04d}"
+                    cur.execute(
+                        "INSERT INTO free_itens (id, nome, descricao, link, estoque, imagem) VALUES (%s, %s, %s, %s, %s, %s)",
+                        (item_id, nome, descricao, link_download, estoque, imagem_url)
+                    )
+        finally:
+            conn.close()
 
         canal = interaction.guild.get_channel(CH_FREE)
         item = {"nome": nome, "descricao": descricao, "link": link_download,
                 "estoque": estoque, "imagem": imagem_url}
         embed = self._build_embed(item_id, item)
         view = FreeView(item_id)
-        self.bot.add_view(view)  # registra a nova view imediatamente
+        self.bot.add_view(view)
         msg = await canal.send(embed=embed, view=view)
 
-        with get_conn() as conn:
-            conn.execute("UPDATE free_itens SET msg_id = ? WHERE id = ?", (msg.id, item_id))
+        conn = get_conn()
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE free_itens SET msg_id = %s WHERE id = %s", (msg.id, item_id))
+        finally:
+            conn.close()
 
         await interaction.followup.send(f"✅ Item **{nome}** adicionado! (ID: `{item_id}`)", ephemeral=True)
 
@@ -123,8 +145,13 @@ class Free(commands.Cog):
 
         await interaction.response.defer(ephemeral=True)
 
-        with get_conn() as conn:
-            item = conn.execute("SELECT * FROM free_itens WHERE id = ?", (item_id,)).fetchone()
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM free_itens WHERE id = %s", (item_id,))
+                item = cur.fetchone()
+        finally:
+            conn.close()
 
         if not item:
             await interaction.followup.send("❌ Item não encontrado.", ephemeral=True)
@@ -138,8 +165,13 @@ class Free(commands.Cog):
             except Exception:
                 pass
 
-        with get_conn() as conn:
-            conn.execute("DELETE FROM free_itens WHERE id = ?", (item_id,))
+        conn = get_conn()
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM free_itens WHERE id = %s", (item_id,))
+        finally:
+            conn.close()
 
         await interaction.followup.send(f"✅ Item `{item_id}` removido.", ephemeral=True)
 

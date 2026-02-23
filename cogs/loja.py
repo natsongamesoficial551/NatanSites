@@ -22,8 +22,13 @@ class CarrinhoView(discord.ui.View):
     async def carrinho_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         produto_id = interaction.data["custom_id"].replace("carrinho_btn_", "")
 
-        with get_conn() as conn:
-            produto = conn.execute("SELECT * FROM produtos WHERE id = ?", (produto_id,)).fetchone()
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM produtos WHERE id = %s", (produto_id,))
+                produto = cur.fetchone()
+        finally:
+            conn.close()
 
         if not produto:
             await interaction.response.send_message("❌ Produto não encontrado.", ephemeral=True)
@@ -34,11 +39,11 @@ class CarrinhoView(discord.ui.View):
             return
 
         user_id = str(interaction.user.id)
-        with get_conn() as conn:
-            existente = conn.execute(
-                "SELECT 1 FROM carrinho WHERE user_id = ? AND produto_id = ?",
-                (user_id, produto_id)
-            ).fetchone()
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1 FROM carrinho WHERE user_id = %s AND produto_id = %s", (user_id, produto_id))
+                existente = cur.fetchone()
 
             if existente:
                 await interaction.response.send_message(
@@ -47,10 +52,14 @@ class CarrinhoView(discord.ui.View):
                 )
                 return
 
-            conn.execute(
-                "INSERT INTO carrinho (user_id, produto_id, nome, valor) VALUES (?, ?, ?, ?)",
-                (user_id, produto_id, produto["nome"], produto["valor"])
-            )
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO carrinho (user_id, produto_id, nome, valor) VALUES (%s, %s, %s, %s)",
+                        (user_id, produto_id, produto["nome"], produto["valor"])
+                    )
+        finally:
+            conn.close()
 
         await interaction.response.send_message(
             f"✅ **{produto['nome']}** adicionado ao carrinho!\n"
@@ -75,13 +84,17 @@ class Loja(commands.Cog):
         self._register_views()
 
     def _register_views(self):
-        """Registra as views de todos os produtos salvos ao iniciar."""
         try:
-            with get_conn() as conn:
-                produtos = conn.execute("SELECT id FROM produtos").fetchall()
+            conn = get_conn()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT id FROM produtos")
+                    produtos = cur.fetchall()
+            finally:
+                conn.close()
             for p in produtos:
                 self.bot.add_view(CarrinhoView(p["id"]))
-            logger.info(f"✅ Loja: {len(produtos)} view(s) persistente(s) registrada(s).")
+            logger.info(f"✅ Loja: {len(produtos)} view(s) registrada(s).")
         except Exception as e:
             logger.error(f"Erro ao registrar views loja: {e}")
 
@@ -100,24 +113,34 @@ class Loja(commands.Cog):
 
         await interaction.response.defer(ephemeral=True)
 
-        with get_conn() as conn:
-            count = conn.execute("SELECT COUNT(*) FROM produtos").fetchone()[0]
-            produto_id = f"prod_{count + 1:04d}"
-            conn.execute(
-                "INSERT INTO produtos (id, nome, descricao, valor, estoque, imagem) VALUES (?, ?, ?, ?, ?, ?)",
-                (produto_id, nome, descricao, valor, estoque, imagem_url)
-            )
+        conn = get_conn()
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) FROM produtos")
+                    count = cur.fetchone()["count"]
+                    produto_id = f"prod_{count + 1:04d}"
+                    cur.execute(
+                        "INSERT INTO produtos (id, nome, descricao, valor, estoque, imagem) VALUES (%s, %s, %s, %s, %s, %s)",
+                        (produto_id, nome, descricao, valor, estoque, imagem_url)
+                    )
+        finally:
+            conn.close()
 
         canal = interaction.guild.get_channel(CH_LOJA)
-        produto = {"nome": nome, "descricao": descricao, "valor": valor,
-                   "estoque": estoque, "imagem": imagem_url}
+        produto = {"nome": nome, "descricao": descricao, "valor": valor, "estoque": estoque, "imagem": imagem_url}
         embed = self._build_embed(produto_id, produto)
         view = CarrinhoView(produto_id)
         self.bot.add_view(view)
         msg = await canal.send(embed=embed, view=view)
 
-        with get_conn() as conn:
-            conn.execute("UPDATE produtos SET msg_id = ? WHERE id = ?", (msg.id, produto_id))
+        conn = get_conn()
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("UPDATE produtos SET msg_id = %s WHERE id = %s", (msg.id, produto_id))
+        finally:
+            conn.close()
 
         await interaction.followup.send(f"✅ Produto **{nome}** adicionado! (ID: `{produto_id}`)", ephemeral=True)
 
@@ -131,8 +154,13 @@ class Loja(commands.Cog):
 
         await interaction.response.defer(ephemeral=True)
 
-        with get_conn() as conn:
-            produto = conn.execute("SELECT * FROM produtos WHERE id = ?", (produto_id,)).fetchone()
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM produtos WHERE id = %s", (produto_id,))
+                produto = cur.fetchone()
+        finally:
+            conn.close()
 
         if not produto:
             await interaction.followup.send("❌ Produto não encontrado.", ephemeral=True)
@@ -146,8 +174,13 @@ class Loja(commands.Cog):
             except Exception:
                 pass
 
-        with get_conn() as conn:
-            conn.execute("DELETE FROM produtos WHERE id = ?", (produto_id,))
+        conn = get_conn()
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM produtos WHERE id = %s", (produto_id,))
+        finally:
+            conn.close()
 
         await interaction.followup.send(f"✅ Produto `{produto_id}` removido.", ephemeral=True)
 
@@ -158,8 +191,13 @@ class Loja(commands.Cog):
             await interaction.response.send_message(f"❌ Use no canal <#{CH_CONTROLE}>.", ephemeral=True)
             return
 
-        with get_conn() as conn:
-            itens = conn.execute("SELECT * FROM carrinho ORDER BY user_id").fetchall()
+        conn = get_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT * FROM carrinho ORDER BY user_id")
+                itens = cur.fetchall()
+        finally:
+            conn.close()
 
         if not itens:
             await interaction.response.send_message("🛒 Nenhum item nos carrinhos no momento.", ephemeral=True)
@@ -187,8 +225,13 @@ class Loja(commands.Cog):
             await interaction.response.send_message(f"❌ Use no canal <#{CH_CONTROLE}>.", ephemeral=True)
             return
 
-        with get_conn() as conn:
-            conn.execute("DELETE FROM carrinho WHERE user_id = ?", (str(usuario.id),))
+        conn = get_conn()
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM carrinho WHERE user_id = %s", (str(usuario.id),))
+        finally:
+            conn.close()
 
         await interaction.response.send_message(f"✅ Carrinho de {usuario.mention} limpo.", ephemeral=True)
 
