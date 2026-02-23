@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import asyncio
 import logging
+import os
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from config import *
@@ -17,6 +18,9 @@ class PingHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"NatanSites Bot - Online!")
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
     def log_message(self, format, *args):
         pass
 
@@ -26,17 +30,20 @@ def iniciar_servidor_web():
     servidor.serve_forever()
 
 async def autoping():
-    """Ping a cada 10 minutos para manter o Render acordado."""
+    """Ping a cada 5 minutos via variável BOT_PING para manter o Render acordado."""
     import aiohttp
-    await asyncio.sleep(60)
+    # Usa a variável de ambiente BOT_PING se definida, senão pinga localhost
+    ping_url = os.environ.get("BOT_PING", "http://localhost:8080")
+    logger.info(f"🏓 Autoping configurado para: {ping_url}")
+    await asyncio.sleep(60)  # Aguarda 1 min antes do primeiro ping
     while True:
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get("http://localhost:8080") as resp:
-                    logger.info(f"🏓 Autoping OK — status {resp.status}")
+                async with session.get(ping_url) as resp:
+                    logger.info(f"🏓 Autoping OK — {ping_url} — status {resp.status}")
         except Exception as e:
             logger.warning(f"⚠️ Autoping falhou: {e}")
-        await asyncio.sleep(600)
+        await asyncio.sleep(300)  # 5 minutos
 
 # ── Bot ───────────────────────────────────────────────────────────────
 
@@ -51,7 +58,6 @@ class NatanBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents)
 
     async def setup_hook(self):
-        # Inicia o banco de dados SQLite antes de qualquer coisa
         init_db()
 
         cogs = [
